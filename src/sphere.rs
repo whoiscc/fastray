@@ -29,9 +29,9 @@ impl Hit for Sphere {
             ] {
                 if t_range.contains(&t) {
                     hit_record.t = t;
-                    hit_record.point = ray.p(t);
-                    hit_record.normal = (hit_record.point - self.center) / self.radius;
+                    hit_record.point = ray.at(t);
                     hit_record.material = self.material.clone();
+                    hit_record.set_face_normal(ray, (hit_record.point - self.center) / self.radius);
                     return true;
                 }
             }

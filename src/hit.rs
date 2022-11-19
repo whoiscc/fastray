@@ -13,10 +13,23 @@ pub struct HitRecord {
     pub t: f32,
     pub point: Vec3,
     pub normal: Vec3,
+    pub front_face: bool,
     pub material: Arc<Material>,
 }
 
-pub struct HitList(pub Vec<Box<dyn Hit + Send + Sync>>);
+impl HitRecord {
+    pub fn set_face_normal(&mut self, ray: &Ray, outward_normal: Vec3) {
+        self.front_face = ray.direction.dot(outward_normal) < 0.;
+        self.normal = if self.front_face {
+            outward_normal
+        } else {
+            -outward_normal
+        };
+    }
+}
+
+// maybe called `World` directly
+pub struct HitList(pub Vec<Arc<dyn Hit + Send + Sync>>);
 
 impl Hit for HitList {
     fn hit(&self, ray: &Ray, mut t_range: Range<f32>, hit_record: &mut HitRecord) -> bool {
