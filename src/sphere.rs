@@ -2,7 +2,10 @@ use std::{ops::Range, sync::Arc};
 
 use glam::Vec3;
 
-use crate::{hit::Aabb, material::Material, Hit};
+use crate::{
+    material::Material,
+    shape::{Aabb, HitRecord},
+};
 
 pub struct Sphere {
     pub center: Vec3,
@@ -10,13 +13,8 @@ pub struct Sphere {
     pub material: Arc<Material>,
 }
 
-impl Hit for Sphere {
-    fn hit(
-        &self,
-        ray: &crate::Ray,
-        t_range: Range<f32>,
-        hit_record: &mut crate::hit::HitRecord,
-    ) -> bool {
+impl Sphere {
+    pub fn hit(&self, ray: &crate::Ray, t_range: Range<f32>) -> Option<HitRecord> {
         let oc = ray.origin - self.center;
         let a = ray.direction.dot(ray.direction);
         let b = oc.dot(ray.direction);
@@ -28,18 +26,21 @@ impl Hit for Sphere {
                 (-b + discriminant.sqrt()) / a,
             ] {
                 if t_range.contains(&t) {
-                    hit_record.t = t;
-                    hit_record.point = ray.at(t);
-                    hit_record.material = self.material.clone();
+                    let mut hit_record = HitRecord {
+                        t,
+                        point: ray.at(t),
+                        material: self.material.clone(),
+                        ..Default::default()
+                    };
                     hit_record.set_face_normal(ray, (hit_record.point - self.center) / self.radius);
-                    return true;
+                    return Some(hit_record);
                 }
             }
         }
-        false
+        None
     }
 
-    fn bounding_box(&self) -> Option<crate::hit::Aabb> {
+    pub fn bounding_box(&self) -> Option<crate::shape::Aabb> {
         Some(Aabb {
             min: self.center - self.radius,
             max: self.center + self.radius,

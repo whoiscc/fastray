@@ -3,11 +3,30 @@ use std::{mem::swap, ops::Range, sync::Arc};
 use glam::Vec3;
 use rand::Rng;
 
-use crate::{material::Material, Ray};
+use crate::{material::Material, Ray, Sphere};
 
-pub trait Hit {
-    fn hit(&self, ray: &Ray, t_range: Range<f32>, hit_record: &mut HitRecord) -> bool;
-    fn bounding_box(&self) -> Option<Aabb>;
+pub enum Shape {
+    Sphere(Sphere),
+    List(ShapeList),
+    Bvh(BvhNode),
+}
+
+impl Shape {
+    pub fn hit(&self, ray: &Ray, t_range: Range<f32>) -> Option<HitRecord> {
+        match self {
+            Self::Sphere(shape) => shape.hit(ray, t_range),
+            Self::List(shape) => shape.hit(ray, t_range),
+            Self::Bvh(shape) => shape.hit(ray, t_range),
+        }
+    }
+
+    pub fn bounding_box(&self) -> Option<Aabb> {
+        match self {
+            Self::Sphere(shape) => shape.bounding_box(),
+            Self::List(shape) => shape.bounding_box(),
+            Self::Bvh(shape) => shape.bounding_box(),
+        }
+    }
 }
 
 #[derive(Clone, Default)]
@@ -31,19 +50,18 @@ impl HitRecord {
 }
 
 // maybe called `World` directly
-pub struct HitList(pub Vec<Arc<dyn Hit + Send + Sync>>);
+pub struct ShapeList(pub Vec<Arc<Shape>>);
 
-impl Hit for HitList {
-    fn hit(&self, ray: &Ray, mut t_range: Range<f32>, hit_record: &mut HitRecord) -> bool {
-        let mut do_hit = false;
+impl ShapeList {
+    fn hit(&self, ray: &Ray, mut t_range: Range<f32>) -> Option<HitRecord> {
+        let mut hit_record = None;
         for entity in &self.0 {
-            if !entity.hit(ray, t_range.clone(), hit_record) {
-                continue;
+            hit_record = entity.hit(ray, t_range.clone()).or(hit_record);
+            if let Some(hit_record) = &hit_record {
+                t_range.end = hit_record.t;
             }
-            do_hit = true;
-            t_range.end = hit_record.t;
         }
-        do_hit
+        hit_record
     }
 
     fn bounding_box(&self) -> Option<Aabb> {
@@ -94,22 +112,22 @@ impl Aabb {
 }
 
 pub struct BvhNode {
-    pub left: Arc<dyn Hit + Send + Sync>,
-    pub right: Arc<dyn Hit + Send + Sync>,
+    pub left: Arc<Shape>,
+    pub right: Arc<Shape>,
     pub bounding_box: Aabb,
 }
 
-impl Hit for BvhNode {
-    fn hit(&self, ray: &Ray, mut t_range: Range<f32>, hit_record: &mut HitRecord) -> bool {
+impl BvhNode {
+    fn hit(&self, ray: &Ray, mut t_range: Range<f32>) -> Option<HitRecord> {
         if !self.bounding_box.hit(ray, t_range.clone()) {
-            return false;
+            return None;
         }
-        let hit_left = self.left.hit(ray, t_range.clone(), hit_record);
-        if hit_left {
+        let hit_left = self.left.hit(ray, t_range.clone());
+        if let Some(hit_record) = &hit_left {
             t_range.end = hit_record.t;
         }
-        let hit_right = self.right.hit(ray, t_range, hit_record);
-        hit_left || hit_right
+        let hit_right = self.right.hit(ray, t_range);
+        hit_right.or(hit_left)
     }
 
     fn bounding_box(&self) -> Option<Aabb> {
@@ -118,9 +136,9 @@ impl Hit for BvhNode {
 }
 
 impl BvhNode {
-    pub fn new(entities: &mut [Arc<dyn Hit + Send + Sync>], rng: &mut impl Rng) -> Self {
+    pub fn new(entities: &mut [Arc<Shape>], rng: &mut impl Rng) -> Self {
         let axis = rng.gen_range(0..3);
-        let k = |entity: &Arc<dyn Hit + Send + Sync>| entity.bounding_box().unwrap().min[axis];
+        let k = |entity: &Arc<Shape>| entity.bounding_box().unwrap().min[axis];
         let (left, right) = match entities {
             [] => unreachable!(),
             [entity] => (entity.clone(), entity.clone()),
@@ -137,8 +155,8 @@ impl BvhNode {
                 });
                 let (left_node, right_node) = entities.split_at_mut(entities.len() / 2);
                 (
-                    Arc::new(Self::new(left_node, rng)) as Arc<dyn Hit + Send + Sync>,
-                    Arc::new(Self::new(right_node, rng)) as Arc<dyn Hit + Send + Sync>,
+                    Arc::new(Shape::Bvh(Self::new(left_node, rng))),
+                    Arc::new(Shape::Bvh(Self::new(right_node, rng))),
                 )
             }
         };

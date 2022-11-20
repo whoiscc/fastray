@@ -1,7 +1,7 @@
 use glam::Vec3;
 use rand::Rng;
 
-use crate::{hit::HitRecord, Ray};
+use crate::{shape::HitRecord, Ray};
 
 #[derive(Default)]
 pub enum Material {

@@ -6,28 +6,23 @@ use std::{
     time::Instant,
 };
 
-use fastray::{
-    camera::ThinLens,
-    hit::{BvhNode, HitRecord},
-    material, Camera, Hit, Material, Ray, Sphere,
-};
+use fastray::{camera::ThinLens, material, shape::BvhNode, Camera, Material, Ray, Shape, Sphere};
 use glam::{vec3, Vec3};
 use rand::{distributions::WeightedIndex, prelude::Distribution, thread_rng, Rng};
 use rayon::prelude::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator};
 
 static N_RAY: AtomicU32 = AtomicU32::new(0);
-fn color(ray: &Ray, world: &impl Hit, depth: i32, rng: &mut impl Rng) -> Vec3 {
+fn color(ray: &Ray, world: &Shape, depth: i32, rng: &mut impl Rng) -> Vec3 {
     if depth == 0 {
         return Vec3::ZERO;
     }
     N_RAY.fetch_add(1, Ordering::Relaxed);
 
-    let mut hit_record = HitRecord::default();
-    if !world.hit(ray, 0.001..f32::MAX, &mut hit_record) {
+    let Some(hit_record) = world.hit(ray, 0.001..f32::MAX) else {
         let direction = ray.direction.normalize();
         let t = 0.5 * (direction.y + 1.);
         return Vec3::ONE.lerp(vec3(0.5, 0.7, 1.), t);
-    }
+    };
 
     let mut scattered = Ray::default();
     let mut attenuation = Vec3::default();
@@ -45,7 +40,7 @@ fn main() {
     let aspect_ratio = 16. / 9.;
     let image_width = 1280;
     let image_height = (image_width as f32 / aspect_ratio) as _;
-    let n_samples = 512;
+    let pixel_sample = 512;
     let max_depth = 50;
 
     let camera = ThinLens::new(
@@ -61,38 +56,38 @@ fn main() {
 
     let start = Instant::now();
     let scanlines_remaining = AtomicU32::new(image_height);
+    let n_sample = AtomicU32::new(0);
     let scanlines: Vec<Vec<Vec3>> = (0..image_height)
         .into_par_iter()
         .rev()
         .map(|j| {
             let elapsed = Instant::now() - start;
-            let n_ray = N_RAY.load(Ordering::Relaxed) as f32;
+            let n_ray = N_RAY.load(Ordering::Relaxed);
             let scanlines_remaining = scanlines_remaining.fetch_sub(1, Ordering::Relaxed);
             eprint!(
                 "\r[{:.2?}] Scanlines remaining: {}/{image_height}, {:.2}M rays/sec, Average depth: {:.2}{:12}",
                 elapsed,
                 scanlines_remaining,
-                n_ray / elapsed.as_secs_f32() / 1000. / 1000.,
+                n_ray as f32 / elapsed.as_secs_f32() / 1000. / 1000.,
                 // no worry to divide 0 with floating point arith
-                n_ray
-                    / (image_height - scanlines_remaining) as f32
-                    / image_width as f32
-                    / n_samples as f32,
+                n_ray as f32 / n_sample.load(Ordering::Relaxed) as f32,
                 ""
             );
             let mut rng = thread_rng();
             (0..image_width)
                 .map(|i| {
-                    let c = ((0..n_samples)
+                    let c = ((0..pixel_sample)
                         .map(|_| {
                             let u = (i as f32 + rng.gen::<f32>()) / image_width as f32;
                             let v = (j as f32 + rng.gen::<f32>()) / image_height as f32;
                             let ray = camera.get_ray(u, v, &mut rng);
+                            // n_sample.fetch_add(1, Ordering::Relaxed);
                             color(&ray, &world, max_depth, &mut rng)
                         })
                         .sum::<Vec3>()
-                        / n_samples as f32)
+                        / pixel_sample as f32)
                         .clamp(Vec3::ZERO, Vec3::splat(0.999));
+                    n_sample.fetch_add(pixel_sample, Ordering::Relaxed);
                     Vec3::new(c[0].sqrt(), c[1].sqrt(), c[2].sqrt())
                 })
                 .collect::<Vec<_>>()
@@ -117,39 +112,39 @@ fn main() {
     }
 }
 
-fn random_scene(rng: &mut impl Rng) -> impl Hit {
+fn random_scene(rng: &mut impl Rng) -> Shape {
     let mut world = vec![
         // ground
-        Arc::new(Sphere {
+        Arc::new(Shape::Sphere(Sphere {
             center: vec3(0., -1000., 0.),
             radius: 1000.,
             material: Arc::new(Material::Lambertian(material::Lambertian {
                 albedo: vec3(0.5, 0.5, 0.5),
             })),
-        }) as Arc<dyn Hit + Send + Sync>,
+        })),
         // main
-        Arc::new(Sphere {
+        Arc::new(Shape::Sphere(Sphere {
             center: vec3(0., 1., 0.),
             radius: 1.,
             material: Arc::new(Material::Dielectric(material::Dielectric {
                 refractive_index: 1.5,
             })),
-        }),
-        Arc::new(Sphere {
+        })),
+        Arc::new(Shape::Sphere(Sphere {
             center: vec3(-4., 1., 0.),
             radius: 1.,
             material: Arc::new(Material::Lambertian(material::Lambertian {
                 albedo: vec3(0.4, 0.2, 0.1),
             })),
-        }),
-        Arc::new(Sphere {
+        })),
+        Arc::new(Shape::Sphere(Sphere {
             center: vec3(4., 1., 0.),
             radius: 1.,
             material: Arc::new(Material::Metal(material::Metal {
                 albedo: vec3(0.7, 0.6, 0.5),
                 fuzz: 0.,
             })),
-        }),
+        })),
     ];
     for a in -11..11 {
         for b in -11..11 {
@@ -179,12 +174,12 @@ fn random_scene(rng: &mut impl Rng) -> impl Hit {
                 }),
                 _ => unreachable!(),
             };
-            world.push(Arc::new(Sphere {
+            world.push(Arc::new(Shape::Sphere(Sphere {
                 center,
                 radius: 0.2,
                 material: Arc::new(material),
-            }))
+            })))
         }
     }
-    BvhNode::new(&mut world, rng)
+    Shape::Bvh(BvhNode::new(&mut world, rng))
 }

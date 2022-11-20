@@ -1,10 +1,10 @@
 pub mod camera;
-pub mod hit;
 pub mod material;
 pub mod ray;
+pub mod shape;
 pub mod sphere;
 pub use camera::Camera;
-pub use hit::Hit;
 pub use material::Material;
 pub use ray::Ray;
+pub use shape::Shape;
 pub use sphere::Sphere;
