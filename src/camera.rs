@@ -7,7 +7,7 @@ pub trait Camera {
     fn get_ray(&self, u: f32, v: f32, rng: &mut impl Rng) -> Ray;
 }
 
-pub struct DefaultCamera {
+pub struct ThinLens {
     pub lower_left_corner: Vec3,
     pub origin: Vec3,
     pub horizontal: Vec3,
@@ -18,7 +18,7 @@ pub struct DefaultCamera {
     pub lens_radius: f32,
 }
 
-impl DefaultCamera {
+impl ThinLens {
     pub fn new(
         look_from: Vec3,
         look_at: Vec3,
@@ -51,7 +51,7 @@ impl DefaultCamera {
     }
 }
 
-impl Camera for DefaultCamera {
+impl Camera for ThinLens {
     fn get_ray(&self, s: f32, t: f32, rng: &mut impl Rng) -> Ray {
         let rd = self.lens_radius * random_in_unit_disk(rng);
         let offset = self.u * rd.x + self.v * rd.y;
