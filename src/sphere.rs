@@ -2,7 +2,7 @@ use std::{ops::Range, sync::Arc};
 
 use glam::Vec3;
 
-use crate::{material::Material, Hit};
+use crate::{hit::Aabb, material::Material, Hit};
 
 pub struct Sphere {
     pub center: Vec3,
@@ -37,5 +37,12 @@ impl Hit for Sphere {
             }
         }
         false
+    }
+
+    fn bounding_box(&self) -> Option<crate::hit::Aabb> {
+        Some(Aabb {
+            min: self.center - self.radius,
+            max: self.center + self.radius,
+        })
     }
 }

@@ -8,7 +8,7 @@ use std::{
 
 use fastray::{
     camera::ThinLens,
-    hit::{HitList, HitRecord},
+    hit::{BvhNode, HitRecord},
     material, Camera, Hit, Material, Ray, Sphere,
 };
 use glam::{vec3, Vec3};
@@ -105,9 +105,8 @@ fn main() {
     println!("P3");
     println!("{image_width} {image_height}");
     println!("255");
-    for j in 0..image_height as usize {
-        for i in 0..image_width as usize {
-            let color = scanlines[j][i];
+    for scanline in scanlines {
+        for color in scanline {
             println!(
                 "{} {} {}",
                 (color[0] * 256.) as u8,
@@ -118,7 +117,7 @@ fn main() {
     }
 }
 
-fn random_scene(rng: &mut impl Rng) -> HitList {
+fn random_scene(rng: &mut impl Rng) -> impl Hit {
     let mut world = vec![
         // ground
         Arc::new(Sphere {
@@ -187,5 +186,5 @@ fn random_scene(rng: &mut impl Rng) -> HitList {
             }))
         }
     }
-    HitList(world)
+    BvhNode::new(&mut world, rng)
 }
