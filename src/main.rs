@@ -34,12 +34,20 @@ fn color(ray: &Ray, world: &HitList, depth: i32, rng: &mut impl Rng) -> Vec3 {
 
 fn main() {
     let aspect_ratio = 16. / 9.;
-    let image_width = 400;
+    let image_width = 1280;
     let image_height = (image_width as f32 / aspect_ratio) as _;
-    let n_samples = 256;
+    let n_samples = 512;
     let max_depth = 50;
 
-    let camera = DefaultCamera::default();
+    let camera = DefaultCamera::new(
+        vec3(13., 2., 3.),
+        Vec3::ZERO,
+        Vec3::Y,
+        20.,
+        aspect_ratio,
+        0.1,
+        10.,
+    );
     let world = HitList(vec![
         Arc::new(Sphere {
             center: vec3(0., 0., -1.),
@@ -84,7 +92,7 @@ fn main() {
                 .map(|_| {
                     let u = (i as f32 + rng.gen::<f32>()) / image_width as f32;
                     let v = (j as f32 + rng.gen::<f32>()) / image_height as f32;
-                    let ray = camera.get_ray(u, v);
+                    let ray = camera.get_ray(u, v, &mut rng);
                     color(&ray, &world, max_depth, &mut rng)
                 })
                 .sum::<Vec3>()
