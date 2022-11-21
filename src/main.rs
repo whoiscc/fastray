@@ -8,7 +8,9 @@ use std::{
 
 use fastray::{camera::ThinLens, material, shape::BvhNode, Camera, Material, Ray, Shape, Sphere};
 use glam::{vec3, Vec3};
-use rand::{distributions::WeightedIndex, prelude::Distribution, thread_rng, Rng};
+use rand::{
+    distributions::WeightedIndex, prelude::Distribution, rngs::StdRng, thread_rng, Rng, SeedableRng,
+};
 use rayon::prelude::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator};
 
 static N_RAY: AtomicU32 = AtomicU32::new(0);
@@ -52,27 +54,34 @@ fn main() {
         0.1,
         10.,
     );
-    let world = random_scene(&mut thread_rng());
+    let world = random_scene(&mut StdRng::seed_from_u64(0));
+
+    println!("P3");
+    println!("{image_width} {image_height}");
+    println!("255");
 
     let start = Instant::now();
-    let scanlines_remaining = AtomicU32::new(image_height);
+    let n_scanline = AtomicU32::new(0);
     let n_sample = AtomicU32::new(0);
-    let scanlines: Vec<Vec<Vec3>> = (0..image_height)
+    let report = || {
+        let elapsed = Instant::now() - start;
+        let n_ray = N_RAY.load(Ordering::Relaxed);
+        let n_scanline = n_scanline.fetch_add(1, Ordering::Relaxed);
+        eprint!(
+            "\r[{:.2?}] Scanline: {}/{image_height}, {:.2}M rays/sec, Average depth: {:.2}{:12}",
+            elapsed,
+            n_scanline,
+            n_ray as f32 / elapsed.as_secs_f32() / 1000. / 1000.,
+            // no worry to divide 0 with floating point arith
+            n_ray as f32 / n_sample.load(Ordering::Relaxed) as f32,
+            ""
+        );
+    };
+    (0..image_height)
         .into_par_iter()
         .rev()
         .map(|j| {
-            let elapsed = Instant::now() - start;
-            let n_ray = N_RAY.load(Ordering::Relaxed);
-            let scanlines_remaining = scanlines_remaining.fetch_sub(1, Ordering::Relaxed);
-            eprint!(
-                "\r[{:.2?}] Scanlines remaining: {}/{image_height}, {:.2}M rays/sec, Average depth: {:.2}{:12}",
-                elapsed,
-                scanlines_remaining,
-                n_ray as f32 / elapsed.as_secs_f32() / 1000. / 1000.,
-                // no worry to divide 0 with floating point arith
-                n_ray as f32 / n_sample.load(Ordering::Relaxed) as f32,
-                ""
-            );
+            report();
             let mut rng = thread_rng();
             (0..image_width)
                 .map(|i| {
@@ -92,24 +101,23 @@ fn main() {
                 })
                 .collect::<Vec<_>>()
         })
-        .collect();
+        // a little bit surprised to see rayon does not provide a way to avoid this collecting
+        .collect::<Vec<_>>()
+        .into_iter()
+        .for_each(|scanline| {
+            for color in scanline {
+                println!(
+                    "{} {} {}",
+                    (color[0] * 256.) as u8,
+                    (color[1] * 256.) as u8,
+                    (color[2] * 256.) as u8
+                );
+            }
+        });
 
+    report();
     eprintln!();
     eprintln!("Done.");
-
-    println!("P3");
-    println!("{image_width} {image_height}");
-    println!("255");
-    for scanline in scanlines {
-        for color in scanline {
-            println!(
-                "{} {} {}",
-                (color[0] * 256.) as u8,
-                (color[1] * 256.) as u8,
-                (color[2] * 256.) as u8
-            );
-        }
-    }
 }
 
 fn random_scene(rng: &mut impl Rng) -> Shape {
